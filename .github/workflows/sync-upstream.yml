@@ -1,0 +1,61 @@
+name: 自动同步上游仓库
+
+on:
+  # 支持手动触发测试
+  workflow_dispatch:
+  
+  # 每天 UTC 0:00 自动执行（对应北京时间 8:00）
+  schedule:
+    - cron: '0 0 * * *'
+
+# 授予仓库写入权限
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出当前仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 配置 Git 身份信息
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: 添加上游仓库并拉取更新
+        run: |
+          git remote add upstream https://github.com/tushen6/Tomorrow.git
+          git fetch upstream master
+
+      - name: 执行同步并保留本地工作流
+        run: |
+          git checkout master
+          
+          # 1. 先备份本地的工作流目录到临时路径
+          if [ -d ".github/workflows" ]; then
+            cp -r .github/workflows /tmp/workflows-backup
+          fi
+          
+          # 2. 强制同步上游代码（完全对齐上游）
+          git reset --hard upstream/master
+          
+          # 3. 恢复本地工作流文件，确保自动同步能力不丢失
+          if [ -d "/tmp/workflows-backup" ]; then
+            mkdir -p .github
+            rm -rf .github/workflows
+            cp -r /tmp/workflows-backup .github/workflows
+            git add .github/workflows
+          fi
+          
+          # 4. 只有当工作流文件有变更时才提交，避免空提交报错
+          if ! git diff --cached --quiet; then
+            git commit -m "恢复本地同步工作流，保留自动同步能力"
+          fi
+          
+          # 5. 推送到自己的仓库
+          git push origin master --force
